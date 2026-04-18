@@ -53,3 +53,8 @@ build/
 
 ### Local runtime artifacts ###
 .discordbot.instance.lock
+# Local IDE run configs (may contain tokens)
+.run/
+.idea/copilotDiffState.xml
+.idea/vcs.xml
+.idea/discord.xml
