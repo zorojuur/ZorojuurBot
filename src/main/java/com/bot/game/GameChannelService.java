@@ -88,7 +88,6 @@ public final class GameChannelService {
                 - Use `+<number>` to guess from 1 to 50.
                 - Use `+game status` to check attempts.
                 - Use `+game stop` to stop the current game.
-                - Moderator+ can run game commands in any channel.
                 - One active game per server.
                 """;
     }
