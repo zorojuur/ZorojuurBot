@@ -19,11 +19,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
-import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildChannel;
 
 public final class MutedRoleService {
@@ -74,7 +72,6 @@ public final class MutedRoleService {
             if (role.getName().equalsIgnoreCase(MUTED_ROLE_NAME)
                     && !role.getId().equals(LEGACY_MUTED_ROLE_ID)) {
                 rememberMutedRoleId(guildId, role.getId());
-                ensureMutedRoleAtBottom(role);
                 return role;
             }
         }
@@ -86,7 +83,6 @@ public final class MutedRoleService {
                     .setHoisted(false)
                     .complete();
             rememberMutedRoleId(guildId, created.getId());
-            ensureMutedRoleAtBottom(created);
             return created;
         } catch (Exception ex) {
             return null;
@@ -94,50 +90,11 @@ public final class MutedRoleService {
     }
 
     private void ensureMutedRoleAtBottom(Role mutedRole) {
-        try {
-            mutedRole.getGuild().modifyRolePositions()
-                    .selectPosition(mutedRole)
-                    .moveTo(1)
-                    .queue(success -> {
-                    }, failure -> {
-                    });
-        } catch (Exception ignored) {
-        }
+        // Role hierarchy is managed manually by server staff.
     }
 
     public void ensureMutedRoleChannelPermissions(Guild guild) {
-        Role mutedRole = getMutedRole(guild);
-        if (mutedRole == null) {
-            return;
-        }
-
-        ensureMutedRoleAtBottom(mutedRole);
-
-        for (GuildChannel channel : guild.getChannels()) {
-            if (!(channel instanceof IPermissionContainer permissionContainer)) {
-                continue;
-            }
-
-            if (isAllowedChannel(channel)) {
-                permissionContainer.upsertPermissionOverride(mutedRole)
-                        .clear(Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND, Permission.MESSAGE_HISTORY)
-                        .grant(Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND, Permission.MESSAGE_HISTORY)
-                        .queue(success -> {
-                        }, failure -> {
-                            System.err.println("Failed to apply muted allow override in channel "
-                                    + channel.getId() + ": " + failure.getMessage());
-                        });
-            } else {
-                permissionContainer.upsertPermissionOverride(mutedRole)
-                        .clear(Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND)
-                        .deny(Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND)
-                        .queue(success -> {
-                        }, failure -> {
-                            System.err.println("Failed to apply muted deny override in channel "
-                                    + channel.getId() + ": " + failure.getMessage());
-                        });
-            }
-        }
+        // Channel permissions are managed manually by server staff.
     }
 
     public String validateMuteCanRun(Member member) {
@@ -216,7 +173,6 @@ public final class MutedRoleService {
                 : List.of(mutedRole);
 
         rememberMutedMember(guild.getId(), member.getId(), snapshot, muteUntilEpochMs);
-        ensureMutedRoleChannelPermissions(guild);
 
         guild.modifyMemberRoles(member, toAdd, toRemove)
                 .queue(

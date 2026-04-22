@@ -2,6 +2,7 @@ package com.bot.commands;
 
 import com.bot.game.GameChannelService;
 import com.bot.game.GuessGameService;
+import com.bot.moderation.AccessControlService;
 
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -9,6 +10,7 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 public class GameCommand implements BotCommand, SlashCommandHandler {
     private final GuessGameService guessGameService = GuessGameService.getInstance();
     private final GameChannelService gameChannelService = GameChannelService.getInstance();
+    private final AccessControlService accessControlService = AccessControlService.getInstance();
 
     @Override
     public boolean matches(String commandName) {
@@ -17,14 +19,15 @@ public class GameCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void execute(MessageReceivedEvent event, String commandName, String[] args) {
-        if (!gameChannelService.isGameChannel(event.getGuild(), event.getChannel().getId())) {
+        boolean canRunAnywhere = accessControlService.isModeratorOrHigher(event.getMember());
+        if (!canRunAnywhere && !gameChannelService.isGameChannel(event.getGuild(), event.getChannel().getId())) {
             event.getChannel().sendMessage("Use this in " + gameChannelService.getGameChannelMention(event.getGuild()) + ".")
                     .queue();
             return;
         }
 
         if (args.length == 0) {
-            event.getChannel().sendMessage("Usage: +game <start|guess|status|stop> [number]").queue();
+            event.getChannel().sendMessage("Usage: +game <start|status|stop> or +<number>").queue();
             return;
         }
 
@@ -40,7 +43,7 @@ public class GameCommand implements BotCommand, SlashCommandHandler {
 
     private void handleGuess(MessageReceivedEvent event, String[] args) {
         if (args.length < 2) {
-            event.getChannel().sendMessage("Usage: +game guess <number>").queue();
+            event.getChannel().sendMessage("Usage: +<number> or +game guess <number>").queue();
             return;
         }
 
@@ -59,7 +62,8 @@ public class GameCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void executeSlash(SlashCommandInteractionEvent event) {
-        if (!gameChannelService.isGameChannel(event.getGuild(), event.getChannel().getId())) {
+        boolean canRunAnywhere = accessControlService.isModeratorOrHigher(event.getMember());
+        if (!canRunAnywhere && !gameChannelService.isGameChannel(event.getGuild(), event.getChannel().getId())) {
             event.reply("Use this in " + gameChannelService.getGameChannelMention(event.getGuild()) + ".")
                     .setEphemeral(true)
                     .queue();

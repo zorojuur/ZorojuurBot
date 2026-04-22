@@ -53,20 +53,18 @@ public class PostRoleInfoCommand implements BotCommand {
     }
 
     private String buildStaffRoles(Guild guild) {
-        return "**" + mentionRole(guild, "z") + " -- Zorojuur**\n"
-                + "Full control over the server.\n\n"
-                + "**" + mentionRole(guild, "Admin") + " -- Administrator**\n"
-                + "Manages the server alongside the Owner.\n\n"
-                + "**" + mentionRole(guild, "Head Moderator") + " -- Head Moderator**\n"
-                + "Leads the moderation team.\n\n"
-                + "**" + mentionRole(guild, "Senior Moderator") + " -- Senior Moderator**\n"
-                + "Trusted moderators with access to advanced moderation tools.\n\n"
-                + "**" + mentionRole(guild, "Moderator") + " -- Moderator**\n"
-                + "Keeps the server safe and enforces the rules.\n\n"
-                + "**" + mentionRole(guild, "Trial Moderator") + " -- Trial Moderator**\n"
-                + "New moderators under supervision.\n\n"
-                + "**" + mentionRole(guild, "Giveaway Hoster") + " -- Giveaway Hoster**\n"
-                + "Hosts giveaways and events for the community.";
+        return "**" + mentionRoleById(guild, "1496537304880255198", "Server Manager") + " -- Server Manager**\n"
+                + "Full bot access and staff management permissions.\n\n"
+                + "**" + mentionRoleById(guild, "1496542241903349821", "Head Moderator") + " -- Head Moderator**\n"
+                + "Leads moderation and handles major moderation actions.\n\n"
+                + "**" + mentionRoleById(guild, "1496542172848197783", "Senior Moderator") + " -- Senior Moderator**\n"
+                + "Experienced moderation team role.\n\n"
+                + "**" + mentionRoleById(guild, "1496542109619064942", "Moderator") + " -- Moderator**\n"
+                + "Core moderation team role.\n\n"
+                + "**" + mentionRoleById(guild, "1496541997488672879", "Trial Moderator") + " -- Trial Moderator**\n"
+                + "Entry moderation role with limited commands.\n\n"
+                + "**" + mentionRoleById(guild, "1496542503589908603", "Staff") + " -- Staff**\n"
+                + "Default staff role added to all promoted staff members.";
     }
 
     private String buildPingRoles(Guild guild) {
@@ -103,5 +101,10 @@ public class PostRoleInfoCommand implements BotCommand {
             }
         }
         return "@" + roleName;
+    }
+
+    private String mentionRoleById(Guild guild, String roleId, String fallbackName) {
+        Role role = guild.getRoleById(roleId);
+        return role == null ? "@" + fallbackName : role.getAsMention();
     }
 }

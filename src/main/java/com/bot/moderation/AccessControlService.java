@@ -1,9 +1,7 @@
 package com.bot.moderation;
 
-import java.util.Locale;
 import java.util.Set;
 
-import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
 
@@ -12,21 +10,16 @@ public final class AccessControlService {
     private static final String BOT_OWNER_ID = System.getenv("BOT_OWNER_ID");
     private static final String DEFAULT_OWNER_ID = "1176596440160665741";
 
-    private static final Set<String> HELPER_PLUS_ROLES = Set.of(
-            "helper",
-            "mod",
-            "moderator",
-            "staff",
-            "co-owner",
-            "owner",
-            "admin");
-
-    private static final Set<String> BAN_ALLOWED_ROLES = Set.of(
-            "co-owner",
-            "owner",
-            "admin");
+    private static final String SERVER_MANAGER_ROLE_ID = "1496537304880255198";
+    private static final String HEAD_MODERATOR_ROLE_ID = "1496542241903349821";
+    private static final String SENIOR_MODERATOR_ROLE_ID = "1496542172848197783";
+    private static final String MODERATOR_ROLE_ID = "1496542109619064942";
+    private static final String TRIAL_MODERATOR_ROLE_ID = "1496541997488672879";
 
     private static final Set<String> PUBLIC_COMMANDS = Set.of("game");
+    private static final Set<String> TRIAL_MOD_COMMANDS = Set.of("mute", "warn");
+    private static final Set<String> MODERATOR_COMMANDS = Set.of("mute", "warn", "modlogs", "logs");
+    private static final Set<String> HEAD_MOD_COMMANDS = Set.of("mute", "warn", "modlogs", "logs", "kick", "ban");
 
     private AccessControlService() {
     }
@@ -36,15 +29,7 @@ public final class AccessControlService {
     }
 
     public boolean isHelperPlus(Member member) {
-        if (member == null) {
-            return false;
-        }
-
-        if (member.hasPermission(Permission.ADMINISTRATOR)) {
-            return true;
-        }
-
-        return hasAnyRole(member, HELPER_PLUS_ROLES);
+        return isTrialModeratorOrHigher(member);
     }
 
     public boolean canBan(Member member) {
@@ -52,16 +37,15 @@ public final class AccessControlService {
             return false;
         }
 
-        if (member.hasPermission(Permission.ADMINISTRATOR)) {
-            return true;
-        }
-
-        return hasAnyRole(member, BAN_ALLOWED_ROLES);
+        return isBotOwner(member)
+                || hasRole(member, SERVER_MANAGER_ROLE_ID)
+                || hasRole(member, HEAD_MODERATOR_ROLE_ID);
     }
 
     public boolean canUseCommand(Member member, String commandName) {
-        String lowered = commandName.toLowerCase(Locale.ROOT);
-        if ("giveall".equals(lowered)) {
+        String lowered = commandName.toLowerCase();
+
+        if ("gamerules".equals(lowered) || "postgamerules".equals(lowered)) {
             return isBotOwner(member);
         }
 
@@ -69,36 +53,59 @@ public final class AccessControlService {
             return true;
         }
 
-        if (!isHelperPlus(member)) {
+        if (member == null) {
             return false;
         }
 
-        if ("ban".equals(lowered)
-                || "unban".equals(lowered)
-                || "dm".equals(lowered)
-                || "purge".equals(lowered)
-                || "clean".equals(lowered)
-                || "clear".equals(lowered)
-                || "lock".equals(lowered)
-                || "unlock".equals(lowered)
-                || "slowmode".equals(lowered)
-                || "clearwarns".equals(lowered)
-                || "casedelete".equals(lowered)
-                || "role".equals(lowered)
-                || "dragall".equals(lowered)
-                || "setup".equals(lowered)
-                || "setupverify".equals(lowered)
-                || "verifysetup".equals(lowered)
-                || "setupverifyproto".equals(lowered)
-                || "verifyprotosetup".equals(lowered)
-                || "postverify".equals(lowered)
-                || "verifypost".equals(lowered)
-                || "postverifyproto".equals(lowered)
-                || "verifyprotopost".equals(lowered)) {
-            return canBan(member);
+        if (isOwnerOrServerManager(member)) {
+            return true;
         }
 
-        return true;
+        if ("an".equals(lowered) || "antinuke".equals(lowered)) {
+            return false;
+        }
+
+        if (hasRole(member, HEAD_MODERATOR_ROLE_ID)) {
+            return HEAD_MOD_COMMANDS.contains(lowered);
+        }
+
+        if (hasRole(member, SENIOR_MODERATOR_ROLE_ID) || hasRole(member, MODERATOR_ROLE_ID)) {
+            return MODERATOR_COMMANDS.contains(lowered);
+        }
+
+        if (hasRole(member, TRIAL_MODERATOR_ROLE_ID)) {
+            return TRIAL_MOD_COMMANDS.contains(lowered);
+        }
+
+        return false;
+    }
+
+    public boolean isModeratorOrHigher(Member member) {
+        if (member == null) {
+            return false;
+        }
+
+        return isBotOwner(member)
+                || hasRole(member, SERVER_MANAGER_ROLE_ID)
+                || hasRole(member, HEAD_MODERATOR_ROLE_ID)
+                || hasRole(member, SENIOR_MODERATOR_ROLE_ID)
+                || hasRole(member, MODERATOR_ROLE_ID);
+    }
+
+    public boolean isOwnerOrServerManager(Member member) {
+        if (member == null) {
+            return false;
+        }
+
+        return isBotOwner(member) || hasRole(member, SERVER_MANAGER_ROLE_ID);
+    }
+
+    private boolean isTrialModeratorOrHigher(Member member) {
+        if (member == null) {
+            return false;
+        }
+
+        return isModeratorOrHigher(member) || hasRole(member, TRIAL_MODERATOR_ROLE_ID);
     }
 
     public boolean isBotOwner(Member member) {
@@ -114,9 +121,18 @@ public final class AccessControlService {
         return ownerId.equals(member.getId());
     }
 
-    public boolean hasAnyRole(Member member, Set<String> roleNames) {
+    public boolean hasAnyRole(Member member, Set<String> roleIds) {
         for (Role role : member.getRoles()) {
-            if (roleNames.contains(role.getName().toLowerCase(Locale.ROOT))) {
+            if (roleIds.contains(role.getId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasRole(Member member, String roleId) {
+        for (Role role : member.getRoles()) {
+            if (roleId.equals(role.getId())) {
                 return true;
             }
         }

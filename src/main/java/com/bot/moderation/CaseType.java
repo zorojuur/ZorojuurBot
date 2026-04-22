@@ -8,6 +8,7 @@ public enum CaseType {
     UNBAN,
     WARN,
     PURGE,
-    AUTO_MOD
+    AUTO_MOD,
+    SPAM
 }
 

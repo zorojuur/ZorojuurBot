@@ -8,10 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.Role;
-import net.dv8tion.jda.api.entities.channel.concrete.Category;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 
@@ -19,8 +16,6 @@ public final class DirectMessageLogService {
     private static final DirectMessageLogService INSTANCE = new DirectMessageLogService();
     private static final Color LOG_COLOR = new Color(102, 2, 60);
 
-    private static final String LOG_CATEGORY_ID = "1494787607782096987";
-    private static final String CATEGORY_NAME = "Toeji Bot Log";
     private static final String DEFAULT_CHANNEL_NAME = "bot-dm-log";
 
     private static final String DM_LOG_GUILD_ID_ENV = "DM_LOG_GUILD_ID";
@@ -138,57 +133,11 @@ public final class DirectMessageLogService {
         List<TextChannel> byName = guild.getTextChannelsByName(channelName, true);
         if (!byName.isEmpty()) {
             TextChannel channel = byName.get(0);
-            moveToLogCategoryIfNeeded(guild, channel);
             guildLogChannels.put(guild.getId(), channel.getId());
             return channel;
         }
 
-        Category category = resolveOrCreateCategory(guild);
-
-        long denyView = Permission.VIEW_CHANNEL.getRawValue();
-        long allowView = Permission.VIEW_CHANNEL.getRawValue() | Permission.MESSAGE_SEND.getRawValue()
-                | Permission.MESSAGE_HISTORY.getRawValue();
-
-        var action = guild.createTextChannel(channelName)
-                .addPermissionOverride(guild.getPublicRole(), 0L, denyView);
-
-        if (category != null) {
-            action = action.setParent(category);
-        }
-
-        for (Role role : guild.getRoles()) {
-            String lowered = role.getName().toLowerCase();
-            if (lowered.contains("helper") || lowered.contains("mod") || lowered.contains("staff")
-                    || lowered.contains("owner") || lowered.contains("admin")) {
-                action = action.addPermissionOverride(role, allowView, 0L);
-            }
-        }
-
-        try {
-            TextChannel created = action.complete();
-            guildLogChannels.put(guild.getId(), created.getId());
-            return created;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private Category resolveOrCreateCategory(Guild guild) {
-        Category byId = guild.getCategoryById(LOG_CATEGORY_ID);
-        if (byId != null) {
-            return byId;
-        }
-
-        List<Category> categories = guild.getCategoriesByName(CATEGORY_NAME, true);
-        if (!categories.isEmpty()) {
-            return categories.get(0);
-        }
-
-        try {
-            return guild.createCategory(CATEGORY_NAME).complete();
-        } catch (Exception ignored) {
-            return null;
-        }
+        return null;
     }
 
     private Guild resolveTargetGuild(JDA jda) {
@@ -209,13 +158,6 @@ public final class DirectMessageLogService {
             return guilds.get(0);
         }
 
-        for (Guild guild : guilds) {
-            if (guild.getCategoryById(LOG_CATEGORY_ID) != null
-                    || !guild.getCategoriesByName(CATEGORY_NAME, true).isEmpty()) {
-                return guild;
-            }
-        }
-
         return guilds.get(0);
     }
 
@@ -228,20 +170,6 @@ public final class DirectMessageLogService {
         return DEFAULT_CHANNEL_NAME;
     }
 
-    private void moveToLogCategoryIfNeeded(Guild guild, TextChannel channel) {
-        Category target = guild.getCategoryById(LOG_CATEGORY_ID);
-        if (target == null) {
-            return;
-        }
-
-        if (channel.getParentCategoryIdLong() == target.getIdLong()) {
-            return;
-        }
-
-        channel.getManager().setParent(target).queue(success -> {
-        }, failure -> {
-        });
-    }
 }
 
 

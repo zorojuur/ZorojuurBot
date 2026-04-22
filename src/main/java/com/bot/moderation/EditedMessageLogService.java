@@ -6,17 +6,13 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.dv8tion.jda.api.EmbedBuilder;
-import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.Role;
-import net.dv8tion.jda.api.entities.channel.concrete.Category;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 
 public final class EditedMessageLogService {
     private static final EditedMessageLogService INSTANCE = new EditedMessageLogService();
     private static final Color LOG_COLOR = new Color(102, 2, 60);
     private static final String DEFAULT_CHANNEL_NAME = "edited-message-log";
-    private static final String LOG_CATEGORY_ID = "1494787607782096987";
     private static final String EDITED_LOG_CHANNEL_ID_ENV = "EDITED_LOG_CHANNEL_ID";
     private static final String EDITED_LOG_CHANNEL_NAME_ENV = "EDITED_LOG_CHANNEL_NAME";
 
@@ -102,53 +98,11 @@ public final class EditedMessageLogService {
         List<TextChannel> channels = guild.getTextChannelsByName(channelName, true);
         if (!channels.isEmpty()) {
             TextChannel channel = channels.get(0);
-            moveToLogCategoryIfNeeded(guild, channel);
             guildLogChannels.put(guild.getId(), channel.getId());
             return channel;
         }
 
-        long denyView = Permission.VIEW_CHANNEL.getRawValue();
-        long allowView = Permission.VIEW_CHANNEL.getRawValue() | Permission.MESSAGE_SEND.getRawValue()
-                | Permission.MESSAGE_HISTORY.getRawValue();
-
-        var action = guild.createTextChannel(channelName)
-                .addPermissionOverride(guild.getPublicRole(), 0L, denyView);
-
-        Category category = guild.getCategoryById(LOG_CATEGORY_ID);
-        if (category != null) {
-            action = action.setParent(category);
-        }
-
-        for (Role role : guild.getRoles()) {
-            String lowered = role.getName().toLowerCase();
-            if (lowered.contains("helper") || lowered.contains("mod") || lowered.contains("staff")
-                    || lowered.contains("owner") || lowered.contains("admin")) {
-                action = action.addPermissionOverride(role, allowView, 0L);
-            }
-        }
-
-        try {
-            TextChannel created = action.complete();
-            guildLogChannels.put(guild.getId(), created.getId());
-            return created;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private void moveToLogCategoryIfNeeded(Guild guild, TextChannel channel) {
-        Category target = guild.getCategoryById(LOG_CATEGORY_ID);
-        if (target == null) {
-            return;
-        }
-
-        if (channel.getParentCategoryIdLong() == target.getIdLong()) {
-            return;
-        }
-
-        channel.getManager().setParent(target).queue(success -> {
-        }, failure -> {
-        });
+        return null;
     }
 
     private String resolveChannelName() {

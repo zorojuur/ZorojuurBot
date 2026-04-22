@@ -15,32 +15,29 @@ public class CommandRegistry {
             new GreetingCommand(),
             new GameCommand(),
             new HelpCommand(),
+            new AntiNukeCommand(),
+            new PostGameRulesCommand(),
             new PostReactionRolesCommand(),
             new DeleteReactionRolesCommand(),
             new PostRoleInfoCommand(),
             new PostRulesCommand(),
-            new SetupVerifyPrototypeCommand(),
-            new PostVerifyPrototypeCommand(),
-            new SetupCommand(),
+            new TmodCommand(),
+            new ModCommand(),
+            new SmodCommand(),
+            new HmodCommand(),
+            new ManagerCommand(),
             new MuteCommand(),
             new UnmuteCommand(),
             new KickCommand(),
             new BanCommand(),
             new UnbanCommand(),
-            new DragAllCommand(),
             new PurgeCommand(),
             new CleanCommand(),
-            new LockCommand(),
-            new UnlockCommand(),
-            new SlowmodeCommand(),
             new ClearWarnsCommand(),
             new WarnCommand(),
             new DmCommand(),
             new CaseCommand(),
             new CaseDeleteCommand(),
-            new RoleCommand(),
-            new TmodCommand(),
-            new GiveAllCommand(),
             new WarningInfoCommand(),
             new ModLogsCommand(),
             new ReasonCommand());
@@ -55,18 +52,26 @@ public class CommandRegistry {
             return false;
         }
 
-        String commandName = parts[0].toLowerCase();
+        String firstToken = parts[0].trim();
+        boolean numericGuess = firstToken.matches("\\d+");
+        String commandName = numericGuess ? "game" : firstToken.toLowerCase();
+
         if (!accessControl.canUseCommand(event.getMember(), commandName)) {
             event.getChannel().sendMessageEmbeds(CommandTemplateEmbeds.error(
                     "Access Denied",
-                    "Only staff can use bot commands. Regular members can only use +game."))
+                    "You do not have permission to run that command."))
                     .queue();
             return true;
         }
 
-        String[] args = new String[Math.max(0, parts.length - 1)];
-        if (args.length > 0) {
-            System.arraycopy(parts, 1, args, 0, args.length);
+        String[] args;
+        if (numericGuess) {
+            args = new String[] { "guess", firstToken };
+        } else {
+            args = new String[Math.max(0, parts.length - 1)];
+            if (args.length > 0) {
+                System.arraycopy(parts, 1, args, 0, args.length);
+            }
         }
 
         for (BotCommand command : commands) {
@@ -84,7 +89,7 @@ public class CommandRegistry {
         if (!accessControl.canUseCommand(event.getMember(), commandName)) {
             event.replyEmbeds(CommandTemplateEmbeds.error(
                     "Access Denied",
-                    "Only staff can use bot commands. Regular members can only use /game."))
+                    "You do not have permission to run that command."))
                     .setEphemeral(true)
                     .queue();
             return true;

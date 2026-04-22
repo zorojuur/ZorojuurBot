@@ -19,7 +19,7 @@ public final class GuessGameService {
     public String startGame(String guildId) {
         int target = ThreadLocalRandom.current().nextInt(1, 51);
         gamesByGuild.put(guildId, new GameState(target, 0, true));
-        return "Started a new guessing game. Pick a number from 1 to 50 with `+game guess <number>`!";
+        return "Started a new guessing game. Pick a number from 1 to 50 with `+<number>`!";
     }
 
     public String guess(String guildId, int guessed) {

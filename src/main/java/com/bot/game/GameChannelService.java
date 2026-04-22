@@ -33,6 +33,21 @@ public final class GameChannelService {
         return channel;
     }
 
+    public String postRulesMessage(Guild guild, boolean forceNewMessage) {
+        TextChannel channel = ensureGameChannel(guild);
+        if (channel == null) {
+            return "Game channel was not found.";
+        }
+
+        if (forceNewMessage) {
+            postRules(channel);
+            return "Posted guess game rules in " + channel.getAsMention() + ".";
+        }
+
+        ensurePinnedRules(channel);
+        return "Ensured guess game rules exist in " + channel.getAsMention() + ".";
+    }
+
     public boolean isGameChannel(Guild guild, String channelId) {
         TextChannel channel = ensureGameChannel(guild);
         return channel != null && channel.getId().equals(channelId);
@@ -54,19 +69,23 @@ public final class GameChannelService {
                 return;
             }
 
-            String rules = """
-                    **Guess Game Rules**
-                    - Use `+game start` to begin a game.
-                    - Use `+game guess <number>` to guess from 1 to 50.
-                    - Use `+game status` to check attempts.
-                    - Use `+game stop` to stop the current game.
-                    - One active game per server.
-                    """;
-
-            channel.sendMessage(rules)
-                    .setAllowedMentions(Collections.emptyList())
-                    .queue(message -> message.pin().queue());
+            postRules(channel);
         });
+    }
+
+    private void postRules(TextChannel channel) {
+        String rules = """
+                **Guess Game Rules**
+                - Use `+game start` to begin a game.
+                - Use `+<number>` to guess from 1 to 50.
+                - Use `+game status` to check attempts.
+                - Use `+game stop` to stop the current game.
+                - One active game per server.
+                """;
+
+        channel.sendMessage(rules)
+                .setAllowedMentions(Collections.emptyList())
+                .queue(message -> message.pin().queue());
     }
 
     private TextChannel resolveChannel(Guild guild) {

@@ -31,7 +31,9 @@ import com.bot.moderation.EditedMessageLogService;
 import com.bot.moderation.MessageFilterService;
 import com.bot.moderation.ModLogService;
 import com.bot.moderation.MutedRoleService;
+import com.bot.moderation.SpamDetectionService;
 import net.dv8tion.jda.api.JDABuilder;
+import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
 import net.dv8tion.jda.api.events.message.MessageDeleteEvent;
@@ -50,29 +52,9 @@ import net.dv8tion.jda.api.interactions.commands.build.Commands;
 
 import com.bot.commands.CommandRegistry;
 import com.bot.commands.ModLogsCommand;
-import com.bot.commands.PostVerifyPrototypeCommand;
-import com.bot.game.GameChannelService;
 import com.bot.reactions.ReactionRoleListener;
-import com.bot.voice.VoiceChannelLayoutService;
-import net.dv8tion.jda.api.Permission;
-import net.dv8tion.jda.api.entities.Role;
-import net.dv8tion.jda.api.entities.PermissionOverride;
-import net.dv8tion.jda.api.entities.channel.concrete.Category;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
-import net.dv8tion.jda.api.entities.channel.attribute.IPermissionContainer;
 
 public class Main extends ListenerAdapter {
-    private static final String TARGET_LOG_CATEGORY_ID = "1494787607782096987";
-    private static final String SOURCE_LOG_CATEGORY_ID = "1494741754321305752";
-    private static final String LEGACY_AUTO_GAME_CHANNEL_ID = "1495015165836394578";
-    private static final String LEGACY_AUTO_GAME_CATEGORY_ID = "1495015163596640336";
-    private static final String MEMBER_ROLE_ID = "1482676017028923622";
-    private static final String RULES_CHANNEL_ID = "1475416785493688350";
-    private static final String TICKET_CHANNEL_ID = "1475417718332194877";
-    private static final String VERIFY_CHANNEL_NAME = "verify";
-    private static final String VERIFY_PROTOTYPE_CHANNEL_NAME = "verify-prototype";
-    private static final String VERIFY_TOPIC_MARKER = "[zoro-verify]";
-    private static final String VERIFIED_ROLE_NAME = "Verified";
     private static final long MESSAGE_CACHE_TTL_MS = 120_000;
     private static final int MAX_MESSAGE_CACHE_SIZE = 2_000;
     private static final Map<String, Long> PROCESSED_MESSAGE_IDS = new ConcurrentHashMap<>();
@@ -95,8 +77,7 @@ public class Main extends ListenerAdapter {
     private final EditedMessageLogService editedMessageLogService = EditedMessageLogService.getInstance();
     private final DirectMessageLogService directMessageLogService = DirectMessageLogService.getInstance();
     private final MutedRoleService mutedRoleService = MutedRoleService.getInstance();
-    private final GameChannelService gameChannelService = GameChannelService.getInstance();
-    private final VoiceChannelLayoutService voiceChannelLayoutService = VoiceChannelLayoutService.getInstance();
+    private final SpamDetectionService spamDetectionService = SpamDetectionService.getInstance();
     private final CommandRegistry commandRegistry = new CommandRegistry();
     private final ReactionRoleListener reactionRoleListener = new ReactionRoleListener();
     private final ScheduledExecutorService muteExpiryScheduler = Executors.newSingleThreadScheduledExecutor();
@@ -166,7 +147,49 @@ public class Main extends ListenerAdapter {
             return;
         }
 
+        if (handleSpam(event, message)) {
+            return;
+        }
+
         commandRegistry.dispatch(event, message);
+    }
+
+    private boolean handleSpam(MessageReceivedEvent event, String message) {
+        if (event.getMember() == null || accessControlService.isHelperPlus(event.getMember())) {
+            return false;
+        }
+
+        if (!spamDetectionService.shouldTimeout(event.getMember(), message)) {
+            return false;
+        }
+
+        if (!event.getGuild().getSelfMember().hasPermission(Permission.MODERATE_MEMBERS)
+                || !event.getGuild().getSelfMember().canInteract(event.getMember())) {
+            return false;
+        }
+
+        event.getMember().timeoutFor(5, TimeUnit.MINUTES)
+                .reason("Automatic spam timeout")
+                .queue(
+                        success -> {
+                            CaseRecord record = caseService.addCase(
+                                    CaseType.SPAM,
+                                    event.getGuild().getId(),
+                                    event.getChannel().getId(),
+                                    event.getMember().getId(),
+                                    event.getMember().getUser().getAsTag(),
+                                    event.getJDA().getSelfUser().getId(),
+                                    event.getJDA().getSelfUser().getAsTag(),
+                                    "Automatic spam timeout (5 minutes)",
+                                    "Triggered by rapid message burst.");
+                            modLogService.logCase(event.getGuild(), record);
+                            event.getChannel().sendMessage(
+                                    event.getAuthor().getAsMention() + " timed out for 5 minutes due to spam.")
+                                    .queue();
+                        },
+                        failure -> {
+                        });
+        return true;
     }
 
     @Override
@@ -248,10 +271,6 @@ public class Main extends ListenerAdapter {
         if (ModLogsCommand.handleButton(event)) {
             return;
         }
-
-        if (PostVerifyPrototypeCommand.handleButton(event)) {
-            return;
-        }
     }
 
     @Override
@@ -268,286 +287,21 @@ public class Main extends ListenerAdapter {
         List<Guild> guilds = event.getJDA().getGuilds();
         directMessageLogService.ensureChannel(event.getJDA());
         for (Guild guild : guilds) {
-            voiceChannelLayoutService.ensureVoiceChannelLayout(guild);
-            migrateChannelsToRequestedCategory(guild);
-            enforceLogCategoryVisibility(guild);
             modLogService.ensureChannel(guild);
             deletedMessageLogService.ensureChannel(guild);
             editedMessageLogService.ensureChannel(guild);
-            mutedRoleService.ensureMutedRoleChannelPermissions(guild);
-            ensurePublicReadHistoryPermissions(guild);
-            ensureRoleReadHistoryPermissions(guild, MEMBER_ROLE_ID);
             registerSlashCommands(guild);
-            ensureVerifiedAccess(guild);
-            cleanupLegacyAutoGameResources(guild);
         }
 
         if (muteExpiryTaskStarted.compareAndSet(false, true)) {
             muteExpiryScheduler.scheduleAtFixedRate(() -> {
                 for (Guild guild : event.getJDA().getGuilds()) {
                     mutedRoleService.processMuteExpirations(guild);
-                    mutedRoleService.ensureMutedRoleChannelPermissions(guild);
                 }
             }, 1, 1, TimeUnit.MINUTES);
         }
     }
 
-    private void cleanupLegacyAutoGameResources(Guild guild) {
-        TextChannel legacyChannel = guild.getTextChannelById(LEGACY_AUTO_GAME_CHANNEL_ID);
-        if (legacyChannel != null) {
-            legacyChannel.delete().queue(success -> {
-            }, failure -> {
-            });
-        }
-
-        Category legacyCategory = guild.getCategoryById(LEGACY_AUTO_GAME_CATEGORY_ID);
-        if (legacyCategory != null) {
-            legacyCategory.delete().queue(success -> {
-            }, failure -> {
-            });
-        }
-    }
-
-    private void ensureVerifiedAccess(Guild guild) {
-        Role verifiedRole = findRoleByName(guild, VERIFIED_ROLE_NAME);
-        if (verifiedRole != null) {
-            enforceVerifiedRoleVisibility(guild, verifiedRole);
-            return;
-        }
-
-        guild.createRole()
-                .setName(VERIFIED_ROLE_NAME)
-                .setMentionable(false)
-                .setHoisted(false)
-                .queue(
-                        createdRole -> enforceVerifiedRoleVisibility(guild, createdRole),
-                        failure -> System.err.println("Failed to create Verified role: " + failure.getMessage()));
-    }
-
-    private void enforceVerifiedRoleVisibility(Guild guild, Role verifiedRole) {
-        Role publicRole = guild.getPublicRole();
-        Role memberRole = guild.getRoleById(MEMBER_ROLE_ID);
-
-        for (var channel : guild.getChannels()) {
-            if (!(channel instanceof IPermissionContainer permissionContainer)) {
-                continue;
-            }
-
-            if (!shouldGateAsNormalChannel(channel, guild, publicRole, memberRole)) {
-                continue;
-            }
-
-            permissionContainer.upsertPermissionOverride(publicRole)
-                    .deny(Permission.VIEW_CHANNEL)
-                    .queue(success -> {
-                    }, failure -> {
-                    });
-
-            permissionContainer.upsertPermissionOverride(verifiedRole)
-                    .grant(Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY)
-                    .queue(success -> {
-                    }, failure -> {
-                    });
-
-            if (memberRole != null) {
-                permissionContainer.upsertPermissionOverride(memberRole)
-                        .clear(Permission.VIEW_CHANNEL)
-                        .queue(success -> {
-                        }, failure -> {
-                        });
-            }
-
-            grantStaffVisibility(permissionContainer, guild);
-        }
-    }
-
-    private boolean shouldGateAsNormalChannel(
-            net.dv8tion.jda.api.entities.channel.middleman.GuildChannel channel,
-            Guild guild,
-            Role publicRole,
-            Role memberRole) {
-        if (channel.getId().equals(RULES_CHANNEL_ID)) {
-            return false;
-        }
-
-        if (channel.getId().equals(TICKET_CHANNEL_ID)) {
-            return false;
-        }
-
-        if (channel.getName().equalsIgnoreCase(VERIFY_CHANNEL_NAME)
-                || channel.getName().equalsIgnoreCase(VERIFY_PROTOTYPE_CHANNEL_NAME)) {
-            return false;
-        }
-
-        if (channel instanceof TextChannel textChannelWithTopic) {
-            String topic = textChannelWithTopic.getTopic();
-            if (topic != null && topic.contains(VERIFY_TOPIC_MARKER)) {
-                return false;
-            }
-        }
-
-        if (channel instanceof TextChannel textChannel
-                && TARGET_LOG_CATEGORY_ID.equals(textChannel.getParentCategoryId())) {
-            return false;
-        }
-
-        if (canRoleView((IPermissionContainer) channel, publicRole)) {
-            return true;
-        }
-
-        return memberRole != null && canRoleView((IPermissionContainer) channel, memberRole);
-    }
-
-    private void grantStaffVisibility(IPermissionContainer permissionContainer, Guild guild) {
-        for (Role role : guild.getRoles()) {
-            String lowered = role.getName().toLowerCase();
-            if (lowered.contains("helper") || lowered.contains("mod") || lowered.contains("staff")
-                    || lowered.contains("owner") || lowered.contains("admin")) {
-                permissionContainer.upsertPermissionOverride(role)
-                        .grant(Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY)
-                        .queue(success -> {
-                        }, failure -> {
-                        });
-            }
-        }
-    }
-
-    private Role findRoleByName(Guild guild, String roleName) {
-        for (Role role : guild.getRoles()) {
-            if (role.getName().equalsIgnoreCase(roleName)) {
-                return role;
-            }
-        }
-        return null;
-    }
-
-    private void migrateChannelsToRequestedCategory(Guild guild) {
-        Category source = guild.getCategoryById(SOURCE_LOG_CATEGORY_ID);
-        Category target = guild.getCategoryById(TARGET_LOG_CATEGORY_ID);
-        if (source == null || target == null) {
-            return;
-        }
-
-        for (TextChannel channel : source.getTextChannels()) {
-            channel.getManager().setParent(target).queue(success -> {
-            }, failure -> {
-            });
-        }
-    }
-
-    private void enforceLogCategoryVisibility(Guild guild) {
-        Category category = guild.getCategoryById(TARGET_LOG_CATEGORY_ID);
-        if (category == null) {
-            return;
-        }
-
-        long denyView = Permission.VIEW_CHANNEL.getRawValue();
-        long allowView = Permission.VIEW_CHANNEL.getRawValue() | Permission.MESSAGE_HISTORY.getRawValue();
-
-        for (var channel : category.getChannels()) {
-            if (!(channel instanceof IPermissionContainer permissionContainer)) {
-                continue;
-            }
-
-            permissionContainer.upsertPermissionOverride(guild.getPublicRole())
-                    .deny(Permission.VIEW_CHANNEL)
-                    .queue(success -> {
-                    }, failure -> {
-                    });
-
-            for (Role role : guild.getRoles()) {
-                String lowered = role.getName().toLowerCase();
-                if (lowered.contains("helper") || lowered.contains("mod") || lowered.contains("staff")
-                        || lowered.contains("owner") || lowered.contains("admin")) {
-                    permissionContainer.upsertPermissionOverride(role)
-                            .grant(Permission.VIEW_CHANNEL, Permission.MESSAGE_HISTORY)
-                            .queue(success -> {
-                            }, failure -> {
-                            });
-                }
-            }
-        }
-    }
-
-    private void ensureRoleReadHistoryPermissions(Guild guild, String roleId) {
-        Role role = guild.getRoleById(roleId);
-        if (role == null) {
-            return;
-        }
-
-        for (var channel : guild.getChannels()) {
-            if (!(channel instanceof IPermissionContainer permissionContainer)) {
-                continue;
-            }
-
-            if (hasReadHistory(permissionContainer, role)) {
-                continue;
-            }
-
-            permissionContainer.upsertPermissionOverride(role)
-                    .clear(Permission.MESSAGE_HISTORY)
-                    .grant(Permission.MESSAGE_HISTORY)
-                    .queue(success -> {
-                    }, failure -> {
-                    });
-        }
-    }
-
-    private void ensurePublicReadHistoryPermissions(Guild guild) {
-        Role publicRole = guild.getPublicRole();
-        for (var channel : guild.getChannels()) {
-            if (!(channel instanceof IPermissionContainer permissionContainer)) {
-                continue;
-            }
-
-            if (!canPublicRoleView(permissionContainer, publicRole)) {
-                continue;
-            }
-
-            if (hasReadHistory(permissionContainer, publicRole)) {
-                continue;
-            }
-
-            permissionContainer.upsertPermissionOverride(publicRole)
-                    .clear(Permission.MESSAGE_HISTORY)
-                    .grant(Permission.MESSAGE_HISTORY)
-                    .queue(success -> {
-                    }, failure -> {
-                    });
-        }
-    }
-
-    private boolean canPublicRoleView(IPermissionContainer channel, Role publicRole) {
-        return canRoleView(channel, publicRole);
-    }
-
-    private boolean canRoleView(IPermissionContainer channel, Role role) {
-        PermissionOverride override = channel.getPermissionOverride(role);
-        if (override != null) {
-            if (override.getDenied().contains(Permission.VIEW_CHANNEL)) {
-                return false;
-            }
-            if (override.getAllowed().contains(Permission.VIEW_CHANNEL)) {
-                return true;
-            }
-        }
-
-        return role.hasPermission(Permission.VIEW_CHANNEL);
-    }
-
-    private boolean hasReadHistory(IPermissionContainer channel, Role role) {
-        PermissionOverride override = channel.getPermissionOverride(role);
-        if (override != null) {
-            if (override.getDenied().contains(Permission.MESSAGE_HISTORY)) {
-                return false;
-            }
-            if (override.getAllowed().contains(Permission.MESSAGE_HISTORY)) {
-                return true;
-            }
-        }
-
-        return role.hasPermission(Permission.MESSAGE_HISTORY);
-    }
 
     @Override
     public void onGuildMemberJoin(GuildMemberJoinEvent event) {
@@ -595,7 +349,8 @@ public class Main extends ListenerAdapter {
         guild.updateCommands()
                 .addCommands(
                         Commands.slash("help", "Show moderation bot help"),
-                        Commands.slash("setup", "Run one-time server setup (admin only)"),
+                        Commands.slash("an", "Manage anti-nuke mode (owner/server manager only)")
+                                .addOption(OptionType.STRING, "action", "on, off, status", false),
                         Commands.slash("mute", "Mute member by muted role")
                                 .addOption(OptionType.STRING, "target", "User mention or ID", true)
                                 .addOption(OptionType.STRING, "reason", "Reason", false),
@@ -611,11 +366,6 @@ public class Main extends ListenerAdapter {
                         Commands.slash("unban", "Unban a user (admin only)")
                                 .addOption(OptionType.STRING, "target", "User mention or ID", true)
                                 .addOption(OptionType.STRING, "reason", "Reason", false),
-                        Commands.slash("dragall", "Move everyone in voice to your current voice channel (admin only)"),
-                        Commands.slash("lock", "Lock current channel (admin only)"),
-                        Commands.slash("unlock", "Unlock current channel (admin only)"),
-                        Commands.slash("slowmode", "Set slowmode in current channel (admin only)")
-                                .addOption(OptionType.INTEGER, "seconds", "0-21600", true),
                         Commands.slash("purge", "Purge recent messages")
                                 .addOption(OptionType.INTEGER, "amount", "Amount up to 100", true)
                                 .addOption(OptionType.STRING, "reason", "Reason", false),
@@ -632,9 +382,6 @@ public class Main extends ListenerAdapter {
                         Commands.slash("reason", "Update a case reason")
                                 .addOption(OptionType.INTEGER, "id", "Case ID", true)
                                 .addOption(OptionType.STRING, "reason", "New reason", true),
-                        Commands.slash("role", "Give a role to a member")
-                                .addOption(OptionType.STRING, "role", "Role ID, mention, or name", true)
-                                .addOption(OptionType.STRING, "target", "User mention, ID, or name", true),
                         Commands.slash("game", "Play the guess game")
                                 .addOption(OptionType.STRING, "action", "start, guess, status, stop", true)
                                 .addOption(OptionType.INTEGER, "number", "Required for guess action", false),

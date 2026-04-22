@@ -1,14 +1,9 @@
 package com.bot.commands;
 
-import java.awt.Color;
-
-import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 
 public class HelpCommand implements BotCommand, SlashCommandHandler {
-    private static final Color HELP_COLOR = new Color(102, 2, 60);
-
     @Override
     public boolean matches(String commandName) {
         return "help".equalsIgnoreCase(commandName) || "commands".equalsIgnoreCase(commandName);
@@ -16,7 +11,7 @@ public class HelpCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void execute(MessageReceivedEvent event, String commandName, String[] args) {
-        event.getChannel().sendMessageEmbeds(buildHelpEmbed().build()).queue();
+        event.getChannel().sendMessage(buildHelpText()).queue();
     }
 
     @Override
@@ -26,44 +21,39 @@ public class HelpCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void executeSlash(SlashCommandInteractionEvent event) {
-        event.replyEmbeds(buildHelpEmbed().build()).setEphemeral(true).queue();
+        event.reply(buildHelpText()).setEphemeral(true).queue();
     }
 
-    private EmbedBuilder buildHelpEmbed() {
-        return new EmbedBuilder()
-                .setTitle("⚡ ZOROJUUR BOT COMMANDS ⚡")
-                .setColor(HELP_COLOR)
-                .setDescription("**Use these commands based on your role permissions.**")
-                .addField(
-                        "🔥 TRIAL MODERATOR+ COMMANDS",
-                        "• `+help` - Show this help message\n\n"
-                                + "• `+setup` - One-time setup for this server\n\n"
-                                + "• `+mute <user> [reason]` - Apply muted role\n\n"
-                                + "• `+unmute <user> [reason]` - Restore roles from mute snapshot\n\n"
-                                + "• `+warn <user> [reason]` - Add warning case\n\n"
-                                + "• `+dm <user> <message>` - Send a DM through the bot\n\n"
-                                + "• `+w <user>` - Whois info for a member\n\n"
-                                + "• `+modlogs <user>` - Show recent moderation logs\n\n"
-                                + "• `+case <#id>` - Show case details\n\n"
-                                + "• `+reason <#id> <new reason>` - Update case reason\n\n"
-                                + "• `+kick <user> [reason]` - Kick a member\n\n"
-                                + "• `+game <start|guess|status|stop> [number]` - Guess game\n\n"
-                                + "• `+postreactionroles` / `+deletereactionroles` / `+postroleinfo` / `+postrules`",
-                        false)
-                .addField(
-                        "🛡️ ADMIN ONLY",
-                        "• `+ban <user> [reason]`\n\n"
-                                + "• `+unban <user> [reason]`\n\n"
-                                + "• `+dragall`\n\n"
-                                + "• `+role <role> <user>`\n\n"
-                                + "• `+giveall <role>`\n\n"
-                                + "• `+setupverify [tester] [#channel]` / `+postverify <role>`\n\n"
-                                + "• `+purge <amount> [reason]`\n\n"
-                                + "• `+clean <amount>`\n\n"
-                                + "• `+lock` / `+unlock`\n\n"
-                                + "• `+slowmode <seconds>`\n\n"
-                                + "• `+clearwarns <user> [amount]`\n\n"
-                                + "• `+case delete <#id>` or `+casedelete <#id>`",
-                        false);
+    private String buildHelpText() {
+        return "Commands:\n"
+                + "+help, +commands - show this command list\n"
+                + "+an <on|off|status> - anti-nuke toggle/status\n"
+                + "+gamerules - repost guess game rules (owner only)\n"
+                + "+game <start|status|stop> - manage guess game\n"
+                + "+<number> - submit a guess\n"
+                + "+mute <user> [reason] - mute a user\n"
+                + "+unmute <user> [reason] - unmute a user\n"
+                + "+warn <user> [reason] - warn a user\n"
+                + "+kick <user> [reason] - kick a user\n"
+                + "+ban <user> [reason] - ban a user\n"
+                + "+unban <user> [reason] - unban a user\n"
+                + "+modlogs <user> - show user moderation logs\n"
+                + "+case <id> - view case\n"
+                + "+casedelete <id> - delete case\n"
+                + "+reason <id> <reason> - update case reason\n"
+                + "+clearwarns <user> [amount] - clear warns\n"
+                + "+purge <amount> [reason] - bulk delete messages\n"
+                + "+clean <amount> - clean bot/user command messages\n"
+                + "+dm <user> <message> - send DM through bot\n"
+                + "+w <user> - whois info\n"
+                + "+postreactionroles - post reaction-role panel\n"
+                + "+deletereactionroles - delete reaction-role panel\n"
+                + "+roleinfo - post role info message\n"
+                + "+postrules - post server rules message\n"
+                + "+tmod <user> - assign Trial Moderator + Staff\n"
+                + "+mod <user> - assign Moderator + Staff\n"
+                + "+smod <user> - assign Senior Moderator + Staff\n"
+                + "+hmod <user> - assign Head Moderator + Staff\n"
+                + "+manager <user> - assign Server Manager + Staff";
     }
 }
