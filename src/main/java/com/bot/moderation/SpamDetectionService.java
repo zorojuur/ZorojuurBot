@@ -13,9 +13,9 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 public final class SpamDetectionService {
     private static final SpamDetectionService INSTANCE = new SpamDetectionService();
 
-    private static final long WINDOW_MS = 3_000;
-    private static final int DELETE_THRESHOLD = 6;
-    private static final int TIMEOUT_THRESHOLD = 10;
+    private static final long WINDOW_MS = 2000; // 2 seconds
+    private static final int DELETE_THRESHOLD = 3; // more sensitive
+    private static final int TIMEOUT_THRESHOLD = 3; // more sensitive
 
     private final Map<String, Deque<MessageWindowEntry>> messageTimesByMember = new ConcurrentHashMap<>();
 
@@ -69,6 +69,3 @@ public final class SpamDetectionService {
     private record MessageWindowEntry(long timestamp, String channelId, String messageId) {
     }
 }
-
-
-

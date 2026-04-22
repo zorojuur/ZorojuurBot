@@ -67,17 +67,12 @@ import com.bot.reactions.ReactionRoleListener;
 public class Main extends ListenerAdapter {
     private static final int MASS_ROLE_UPDATE_THRESHOLD = 5;
     private static final long MASS_ROLE_UPDATE_WINDOW_MS = 10_000;
-    private static final int ROLE_DELETE_THRESHOLD = 3;
+    private static final int ROLE_DELETE_THRESHOLD = 2;
     private static final long ROLE_DELETE_WINDOW_MS = 60_000;
+    private static final long ANTINUKE_DEDUP_WINDOW_MS = 8_000;
 
-    private static final String ANTINUKE_LOG_CHANNEL_ID = "1475428173843005552";
-    private static final List<String> ANTINUKE_STAFF_ROLE_IDS = List.of(
-            "1496537304880255198",
-            "1496542241903349821",
-            "1496542172848197783",
-            "1496542109619064942",
-            "1496541997488672879",
-            "1496542503589908603");
+    private static final String ANTINUKE_LOG_CHANNEL_ID = "1496630613996994630"; // updated anti-nuke log channel
+    private static final String SPAM_LOG_CHANNEL_ID = "1496630888484835358"; // new spam log channel
 
     private static final long MESSAGE_CACHE_TTL_MS = 120_000;
     private static final int MAX_MESSAGE_CACHE_SIZE = 2_000;
@@ -105,6 +100,7 @@ public class Main extends ListenerAdapter {
     private final AntiNukeService antiNukeService = AntiNukeService.getInstance();
     private final Map<String, Deque<Long>> roleUpdateEventsByActor = new ConcurrentHashMap<>();
     private final Map<String, Deque<Long>> roleDeleteEventsByActor = new ConcurrentHashMap<>();
+    private final Map<String, Long> recentAntiNukePenalties = new ConcurrentHashMap<>();
     private final CommandRegistry commandRegistry = new CommandRegistry();
     private final ReactionRoleListener reactionRoleListener = new ReactionRoleListener();
     private final ScheduledExecutorService muteExpiryScheduler = Executors.newSingleThreadScheduledExecutor();
@@ -127,6 +123,7 @@ public class Main extends ListenerAdapter {
 
         JDABuilder.createDefault(token)
                 .enableIntents(GatewayIntent.GUILD_MEMBERS)
+                .enableIntents(GatewayIntent.GUILD_MODERATION)
                 .enableIntents(GatewayIntent.GUILD_MESSAGE_REACTIONS)
                 .enableIntents(GatewayIntent.MESSAGE_CONTENT)
                 .addEventListeners(new Main())
@@ -191,10 +188,15 @@ public class Main extends ListenerAdapter {
             return false;
         }
 
+        // Log spam deletions in the spam log channel
+        Guild guild = event.getGuild();
+        var spamLogChannel = guild.getTextChannelById(SPAM_LOG_CHANNEL_ID);
+        String spamLogMsg = "[Spam] Deleted " + action.messageIdsToDelete().size() + " message(s) from " + event.getAuthor().getAsTag() + " (" + event.getAuthor().getId() + ") in <#" + event.getChannel().getId() + "> for spam.";
+        if (spamLogChannel != null && !action.messageIdsToDelete().isEmpty()) {
+            spamLogChannel.sendMessage(spamLogMsg).queue();
+        }
         for (String messageId : action.messageIdsToDelete()) {
-            event.getChannel().deleteMessageById(messageId).queue(success -> {
-            }, failure -> {
-            });
+            event.getChannel().deleteMessageById(messageId).queue(success -> {}, failure -> {});
         }
 
         if (!action.shouldTimeout()) {
@@ -203,6 +205,11 @@ public class Main extends ListenerAdapter {
 
         if (!event.getGuild().getSelfMember().hasPermission(Permission.MODERATE_MEMBERS)
                 || !event.getGuild().getSelfMember().canInteract(event.getMember())) {
+            event.getChannel().sendMessage("[Spam] I tried to timeout " + event.getAuthor().getAsMention() + " for spam, but I do not have permission (my role is too low or missing MODERATE_MEMBERS).").queue();
+            event.getAuthor().openPrivateChannel().queue(
+                channel -> channel.sendMessage("[Spam] I tried to timeout you for spam, but I do not have permission (my role is too low or missing MODERATE_MEMBERS). Please contact the server owner.").queue(),
+                failure -> {}
+            );
             return true;
         }
 
@@ -224,8 +231,17 @@ public class Main extends ListenerAdapter {
                             event.getChannel().sendMessage(
                                     event.getAuthor().getAsMention() + " timed out for 1 minute due to spam.")
                                     .queue();
+                            event.getAuthor().openPrivateChannel().queue(
+                                channel -> channel.sendMessage("[Spam] You have been timed out for 1 minute for spamming. Please slow down.").queue(),
+                                failure -> {}
+                            );
                         },
                         failure -> {
+                            event.getChannel().sendMessage("[Spam] I tried to timeout " + event.getAuthor().getAsMention() + " for spam, but failed due to a Discord error.").queue();
+                            event.getAuthor().openPrivateChannel().queue(
+                                channel -> channel.sendMessage("[Spam] I tried to timeout you for spam, but failed due to a Discord error. Please contact the server owner.").queue(),
+                                f2 -> {}
+                            );
                         });
         return true;
     }
@@ -242,35 +258,26 @@ public class Main extends ListenerAdapter {
             return;
         }
 
-        guild.retrieveAuditLogs()
-                .type(ActionType.CHANNEL_DELETE)
-                .limit(1)
-                .queue(entries -> {
-                    if (entries.isEmpty()) {
-                        return;
-                    }
-
-                    AuditLogEntry entry = entries.get(0);
-                    if (entry == null || entry.getUser() == null) {
-                        return;
-                    }
-
-                    Member actor = guild.getMemberById(entry.getUser().getId());
-                    if (actor == null) {
-                        return;
-                    }
-
-                    enforceAntiNukePenalty(
-                            guild,
-                            actor,
-                            "deleted channel `" + event.getChannel().getName() + "`");
-                }, failure -> {
-                });
+        resolveActorForAuditAction(guild, ActionType.CHANNEL_DELETE, event.getChannel().getId(),
+                actor -> enforceAntiNukePenalty(
+                        guild,
+                        actor,
+                        "deleted channel `" + event.getChannel().getName() + "`",
+                        "channel-delete"));
     }
 
     @Override
     public void onRoleDelete(RoleDeleteEvent event) {
-        // Role-delete enforcement is handled in audit-log create events with threshold logic.
+        Guild guild = event.getGuild();
+        if (!antiNukeService.isEnabled(guild.getId())) {
+            return;
+        }
+
+        resolveActorForAuditAction(guild, ActionType.ROLE_DELETE, event.getRole().getId(), actor -> {
+            if (isRoleDeleteBurst(guild.getId(), actor.getId())) {
+                enforceAntiNukePenalty(guild, actor, "deleted 2 or more roles quickly", "role-delete");
+            }
+        });
     }
 
     @Override
@@ -285,34 +292,81 @@ public class Main extends ListenerAdapter {
             return;
         }
 
-        Member actor = guild.getMemberById(entry.getUser().getId());
-        if (actor == null) {
+        resolveGuildMember(guild, entry.getUser().getId(), actor -> {
+            ActionType type = entry.getType();
+            if (type == ActionType.WEBHOOK_CREATE
+                    || type == ActionType.WEBHOOK_UPDATE
+                    || type == ActionType.WEBHOOK_REMOVE) {
+                enforceAntiNukePenalty(guild, actor, "modified webhooks", "webhook-modify");
+                return;
+            }
+
+            if (type == ActionType.CHANNEL_DELETE) {
+                enforceAntiNukePenalty(guild, actor, "deleted a channel", "channel-delete");
+                return;
+            }
+
+            if (type == ActionType.ROLE_DELETE
+                    && isRoleDeleteBurst(guild.getId(), actor.getId())) {
+                enforceAntiNukePenalty(guild, actor, "deleted 2 or more roles quickly", "role-delete");
+                return;
+            }
+
+            if (type == ActionType.MEMBER_ROLE_UPDATE
+                    && isMassRoleUpdate(guild.getId(), actor.getId())) {
+                enforceAntiNukePenalty(guild, actor, "performed mass member role updates", "mass-role-update");
+            }
+        });
+    }
+
+    private void resolveActorForAuditAction(Guild guild, ActionType actionType, String targetId,
+            java.util.function.Consumer<Member> onActorResolved) {
+        if (!guild.getSelfMember().hasPermission(Permission.VIEW_AUDIT_LOGS)) {
+            logAntiNuke(guild, "Anti-nuke: missing View Audit Log permission, cannot identify who performed "
+                    + actionType.name().toLowerCase() + ".");
             return;
         }
 
-        ActionType type = entry.getType();
-        if (type == ActionType.WEBHOOK_CREATE
-                || type == ActionType.WEBHOOK_UPDATE
-                || type == ActionType.WEBHOOK_REMOVE) {
-            enforceAntiNukePenalty(guild, actor, "modified webhooks");
+        guild.retrieveAuditLogs()
+                .type(actionType)
+                .limit(5)
+                .queue(entries -> {
+                    AuditLogEntry fallbackEntry = null;
+                    for (AuditLogEntry entry : entries) {
+                        if (entry == null || entry.getUser() == null) {
+                            continue;
+                        }
+                        if (fallbackEntry == null) {
+                            fallbackEntry = entry;
+                        }
+                        if (targetId != null && entry.getTargetId() != null && !targetId.equals(entry.getTargetId())) {
+                            continue;
+                        }
+
+                        resolveGuildMember(guild, entry.getUser().getId(), onActorResolved);
+                        return;
+                    }
+
+                    if (fallbackEntry != null) {
+                        resolveGuildMember(guild, fallbackEntry.getUser().getId(), onActorResolved);
+                    }
+                }, failure -> {
+                    logAntiNuke(guild, "Anti-nuke: failed to read audit logs for " + actionType.name().toLowerCase()
+                            + ". Check bot permissions.");
+                });
+    }
+
+    private void resolveGuildMember(Guild guild, String userId, java.util.function.Consumer<Member> onResolved) {
+        Member cached = guild.getMemberById(userId);
+        if (cached != null) {
+            onResolved.accept(cached);
             return;
         }
 
-        if (type == ActionType.CHANNEL_DELETE) {
-            enforceAntiNukePenalty(guild, actor, "deleted a channel");
-            return;
-        }
-
-        if (type == ActionType.ROLE_DELETE
-                && isRoleDeleteBurst(guild.getId(), actor.getId())) {
-            enforceAntiNukePenalty(guild, actor, "deleted more than 2 roles quickly");
-            return;
-        }
-
-        if (type == ActionType.MEMBER_ROLE_UPDATE
-                && isMassRoleUpdate(guild.getId(), actor.getId())) {
-            enforceAntiNukePenalty(guild, actor, "performed mass member role updates");
-        }
+        guild.retrieveMemberById(userId).queue(onResolved, failure -> {
+            logAntiNuke(guild, "Anti-nuke: couldn't resolve executor member " + userId
+                    + ". They may have left the server before punishment.");
+        });
     }
 
     private boolean isRoleDeleteBurst(String guildId, String actorId) {
@@ -349,23 +403,60 @@ public class Main extends ListenerAdapter {
         return false;
     }
 
-    private void enforceAntiNukePenalty(Guild guild, Member actor, String reason) {
+    private void enforceAntiNukePenalty(Guild guild, Member actor, String reason, String category) {
         if (actor.getId().equals(guild.getSelfMember().getId())) {
             return;
         }
-
-        List<Role> rolesToRemove = actor.getRoles().stream()
-                .filter(role -> ANTINUKE_STAFF_ROLE_IDS.contains(role.getId()))
-                .toList();
-        if (rolesToRemove.isEmpty()) {
+        long now = System.currentTimeMillis();
+        String dedupeKey = guild.getId() + ":" + actor.getId() + ":" + category;
+        Long previous = recentAntiNukePenalties.get(dedupeKey);
+        if (previous != null && now - previous < ANTINUKE_DEDUP_WINDOW_MS) {
             return;
         }
-
+        recentAntiNukePenalties.put(dedupeKey, now);
+        Member selfMember = guild.getSelfMember();
+        if (!selfMember.canInteract(actor)) {
+            logAntiNuke(guild, "Anti-nuke: couldn't remove roles from " + actor.getUser().getAsTag()
+                    + " after they " + reason + " because they are above my role hierarchy.");
+            actor.getUser().openPrivateChannel().queue(
+                channel -> channel.sendMessage("[Anti-nuke] I tried to remove your staff roles after: " + reason + ", but I do not have permission (my role is too low). Please contact the server owner.").queue(),
+                failure -> {}
+            );
+            return;
+        }
+        // Only remove these specific staff roles if the user has them
+        List<String> staffRoleIds = List.of("1475427475063574538", "1475529665190957187", "1496537304880255198");
+        List<Role> rolesToRemove = actor.getRoles().stream()
+                .filter(role -> staffRoleIds.contains(role.getId()))
+                .filter(selfMember::canInteract)
+                .toList();
+        if (rolesToRemove.isEmpty()) {
+            logAntiNuke(guild, "Anti-nuke: no removable roles found for " + actor.getUser().getAsTag()
+                    + " after they " + reason + ".");
+            actor.getUser().openPrivateChannel().queue(
+                channel -> channel.sendMessage("[Anti-nuke] I could not find any removable staff roles to remove after: " + reason + ".").queue(),
+                failure -> {}
+            );
+            return;
+        }
         guild.modifyMemberRoles(actor, List.of(), rolesToRemove).queue(
-                success -> logAntiNuke(guild, "Anti-nuke: removed staff roles from "
-                        + actor.getUser().getAsTag() + " after they " + reason + "."),
-                failure -> logAntiNuke(guild, "Anti-nuke: failed to remove staff roles from "
-                        + actor.getUser().getAsTag() + " after they " + reason + "."));
+                success -> {
+                    logAntiNuke(guild, "Anti-nuke: removed staff roles from "
+                        + actor.getUser().getAsTag() + " after they " + reason + ".");
+                    actor.getUser().openPrivateChannel().queue(
+                        channel -> channel.sendMessage("[Anti-nuke] Your staff roles were removed after: " + reason + ".").queue(),
+                        failure -> {}
+                    );
+                },
+                failure -> {
+                    logAntiNuke(guild, "Anti-nuke: failed to remove staff roles from "
+                        + actor.getUser().getAsTag() + " after they " + reason + ".");
+                    actor.getUser().openPrivateChannel().queue(
+                        channel -> channel.sendMessage("[Anti-nuke] I tried to remove your staff roles after: " + reason + ", but failed due to a Discord error. Please contact the server owner.").queue(),
+                        f2 -> {}
+                    );
+                }
+        );
     }
 
     private void logAntiNuke(Guild guild, String message) {
@@ -482,7 +573,6 @@ public class Main extends ListenerAdapter {
             }, 1, 1, TimeUnit.MINUTES);
         }
     }
-
 
     @Override
     public void onGuildMemberJoin(GuildMemberJoinEvent event) {
@@ -668,3 +758,6 @@ public class Main extends ListenerAdapter {
         }
     }
 }
+
+
+

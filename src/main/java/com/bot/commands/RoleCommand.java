@@ -15,6 +15,12 @@ public class RoleCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void execute(MessageReceivedEvent event, String commandName, String[] args) {
+        if (!com.bot.moderation.AccessControlService.getInstance().isOwnerOrServerManager(event.getMember())) {
+            event.getChannel().sendMessageEmbeds(CommandTemplateEmbeds.error(
+                "Role",
+                "Only the owner or server manager can use this command.")).queue();
+            return;
+        }
         if (args.length < 2) {
             event.getChannel().sendMessageEmbeds(CommandTemplateEmbeds.usage(
                     "role",
@@ -57,6 +63,12 @@ public class RoleCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void executeSlash(SlashCommandInteractionEvent event) {
+        if (!com.bot.moderation.AccessControlService.getInstance().isOwnerOrServerManager(event.getMember())) {
+            event.replyEmbeds(CommandTemplateEmbeds.error(
+                "Role",
+                "Only the owner or server manager can use this command.")).setEphemeral(true).queue();
+            return;
+        }
         String roleInput = event.getOption("role", "", option -> option.getAsString());
         String userInput = event.getOption("target", "", option -> option.getAsString());
 

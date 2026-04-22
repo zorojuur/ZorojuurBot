@@ -40,7 +40,9 @@ public class CommandRegistry {
             new CaseDeleteCommand(),
             new WarningInfoCommand(),
             new ModLogsCommand(),
-            new ReasonCommand());
+            new ReasonCommand(),
+            new RoleCommand(),
+            new GiveAllCommand());
 
     public boolean dispatch(MessageReceivedEvent event, String message) {
         if (!message.startsWith(PREFIX) || message.length() == 1) {
