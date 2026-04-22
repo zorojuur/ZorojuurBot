@@ -1,13 +1,12 @@
 package com.bot.commands;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.bot.moderation.AntiNukeService;
 
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 
 public class AntiNukeCommand implements BotCommand, SlashCommandHandler {
-    private final Map<String, Boolean> enabledByGuild = new ConcurrentHashMap<>();
+    private final AntiNukeService antiNukeService = AntiNukeService.getInstance();
 
     @Override
     public boolean matches(String commandName) {
@@ -34,18 +33,19 @@ public class AntiNukeCommand implements BotCommand, SlashCommandHandler {
     private String handleAction(String guildId, String action) {
         return switch (action) {
             case "on", "enable", "enabled" -> {
-                enabledByGuild.put(guildId, true);
+                antiNukeService.setEnabled(guildId, true);
                 yield "Anti-nuke is now enabled.";
             }
             case "off", "disable", "disabled" -> {
-                enabledByGuild.put(guildId, false);
+                antiNukeService.setEnabled(guildId, false);
                 yield "Anti-nuke is now disabled.";
             }
-            case "status" -> enabledByGuild.getOrDefault(guildId, false)
+            case "status" -> antiNukeService.isEnabled(guildId)
                     ? "Anti-nuke is currently enabled."
                     : "Anti-nuke is currently disabled.";
             default -> "Usage: +an <on|off|status>";
         };
     }
 }
+
 

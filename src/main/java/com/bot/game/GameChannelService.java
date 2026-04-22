@@ -11,6 +11,7 @@ public final class GameChannelService {
     private static final GameChannelService INSTANCE = new GameChannelService();
 
     private static final String GAME_CHANNEL_ID = "1494787635884064961";
+    private static final String RULES_MESSAGE_ID = "1494787638605906113";
     private static final String RULES_HEADER = "Guess Game Rules";
 
     private final Map<String, String> channelByGuild = new ConcurrentHashMap<>();
@@ -40,8 +41,9 @@ public final class GameChannelService {
         }
 
         if (forceNewMessage) {
-            postRules(channel);
-            return "Posted guess game rules in " + channel.getAsMention() + ".";
+            channel.editMessageById(RULES_MESSAGE_ID, rulesText()).queue(success -> {
+            }, failure -> postRules(channel));
+            return "Updated guess game rules in " + channel.getAsMention() + ".";
         }
 
         ensurePinnedRules(channel);
@@ -74,18 +76,21 @@ public final class GameChannelService {
     }
 
     private void postRules(TextChannel channel) {
-        String rules = """
+        channel.sendMessage(rulesText())
+                .setAllowedMentions(Collections.emptyList())
+                .queue(message -> message.pin().queue());
+    }
+
+    private String rulesText() {
+        return """
                 **Guess Game Rules**
                 - Use `+game start` to begin a game.
                 - Use `+<number>` to guess from 1 to 50.
                 - Use `+game status` to check attempts.
                 - Use `+game stop` to stop the current game.
+                - Moderator+ can run game commands in any channel.
                 - One active game per server.
                 """;
-
-        channel.sendMessage(rules)
-                .setAllowedMentions(Collections.emptyList())
-                .queue(message -> message.pin().queue());
     }
 
     private TextChannel resolveChannel(Guild guild) {

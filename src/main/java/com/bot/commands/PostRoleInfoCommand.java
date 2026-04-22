@@ -78,19 +78,17 @@ public class PostRoleInfoCommand implements BotCommand {
     }
 
     private String buildLevelRoles(Guild guild) {
-        return "**" + mentionRole(guild, "Level 1") + " -- Level 1**\n"
+        return "**" + mentionRole(guild, "(5)") + " -- Level 5**\n"
                 + "No abilities yet.\n\n"
-                + "**" + mentionRole(guild, "Level 5") + " -- Level 5**\n"
-                + "No abilities yet.\n\n"
-                + "**" + mentionRole(guild, "Level 10") + " -- Media Perms**\n"
+                + "**" + mentionRole(guild, "(10)") + " -- Media Perms**\n"
                 + "Unlocks the ability to send images and GIFs.\n\n"
-                + "**" + mentionRole(guild, "Level 15") + " -- Level 15**\n"
+                + "**" + mentionRole(guild, "(15)") + " -- Level 15**\n"
                 + "Access to images, GIFs, and nickname changes.\n\n"
-                + "**" + mentionRole(guild, "Level 25") + " -- Level 25**\n"
+                + "**" + mentionRole(guild, "(25)") + " -- Level 25**\n"
                 + "Access to images, GIFs, and nickname changes.\n\n"
-                + "**" + mentionRole(guild, "Level 50") + " -- Level 50**\n"
+                + "**" + mentionRole(guild, "(50)") + " -- Level 50**\n"
                 + "Access to all commands from previous levels.\n\n"
-                + "**" + mentionRole(guild, "Level 100") + " -- Level 100**\n"
+                + "**" + mentionRole(guild, "(100)") + " -- Level 100**\n"
                 + "Access to all commands from previous levels.";
     }
 

@@ -11,7 +11,7 @@ public class HelpCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void execute(MessageReceivedEvent event, String commandName, String[] args) {
-        event.getChannel().sendMessage(buildHelpText()).queue();
+        event.getChannel().sendMessageEmbeds(CommandTemplateEmbeds.info("Help", buildHelpText())).queue();
     }
 
     @Override
@@ -21,7 +21,7 @@ public class HelpCommand implements BotCommand, SlashCommandHandler {
 
     @Override
     public void executeSlash(SlashCommandInteractionEvent event) {
-        event.reply(buildHelpText()).setEphemeral(true).queue();
+        event.replyEmbeds(CommandTemplateEmbeds.info("Help", buildHelpText())).setEphemeral(true).queue();
     }
 
     private String buildHelpText() {
