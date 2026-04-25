@@ -71,6 +71,7 @@ public class Main extends ListenerAdapter {
     private static final int ROLE_DELETE_THRESHOLD = 2;
     private static final long ROLE_DELETE_WINDOW_MS = 60_000;
     private static final long ANTINUKE_DEDUP_WINDOW_MS = 8_000;
+    private static final List<Long> CHANNEL_DELETE_AUDIT_RETRY_DELAYS_MS = List.of(0L, 1500L, 4000L);
     private static final List<String> ANTINUKE_STAFF_ROLE_IDS = List.of(
             "1496542503589908603",
             "1496537304880255198",
@@ -234,12 +235,14 @@ public class Main extends ListenerAdapter {
             return;
         }
 
-        resolveActorForAuditAction(guild, ActionType.CHANNEL_DELETE, event.getChannel().getId(),
-                actor -> enforceAntiNukePenalty(
-                        guild,
-                        actor,
-                        "deleted channel `" + event.getChannel().getName() + "`",
-                        "channel-delete"));
+        String reason = "deleted channel `" + event.getChannel().getName() + "`";
+        for (Long delayMs : CHANNEL_DELETE_AUDIT_RETRY_DELAYS_MS) {
+            muteExpiryScheduler.schedule(
+                    () -> resolveActorForAuditAction(guild, ActionType.CHANNEL_DELETE, event.getChannel().getId(),
+                            actor -> enforceAntiNukePenalty(guild, actor, reason, "channel-delete")),
+                    delayMs,
+                    TimeUnit.MILLISECONDS);
+        }
     }
 
     @Override
@@ -305,7 +308,7 @@ public class Main extends ListenerAdapter {
 
         guild.retrieveAuditLogs()
                 .type(actionType)
-                .limit(5)
+                .limit(20)
                 .queue(entries -> {
                     AuditLogEntry fallbackEntry = null;
                     for (AuditLogEntry entry : entries) {
@@ -323,8 +326,14 @@ public class Main extends ListenerAdapter {
                         return;
                     }
 
-                    if (fallbackEntry != null) {
+                    if (targetId == null && fallbackEntry != null) {
                         resolveGuildMember(guild, fallbackEntry.getUser().getId(), onActorResolved);
+                        return;
+                    }
+
+                    if (targetId != null) {
+                        logAntiNuke(guild, "Anti-nuke: audit log entry not found yet for "
+                                + actionType.name().toLowerCase() + " target `" + targetId + "`.");
                     }
                 }, failure -> {
                     logAntiNuke(guild, "Anti-nuke: failed to read audit logs for " + actionType.name().toLowerCase()
