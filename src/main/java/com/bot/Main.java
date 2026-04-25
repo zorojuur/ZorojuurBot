@@ -62,6 +62,7 @@ import net.dv8tion.jda.api.interactions.commands.build.Commands;
 
 import com.bot.commands.CommandRegistry;
 import com.bot.commands.ModLogsCommand;
+import com.bot.commands.PostVerifyPrototypeCommand;
 import com.bot.reactions.ReactionRoleListener;
 
 public class Main extends ListenerAdapter {
@@ -70,6 +71,13 @@ public class Main extends ListenerAdapter {
     private static final int ROLE_DELETE_THRESHOLD = 2;
     private static final long ROLE_DELETE_WINDOW_MS = 60_000;
     private static final long ANTINUKE_DEDUP_WINDOW_MS = 8_000;
+    private static final List<String> ANTINUKE_STAFF_ROLE_IDS = List.of(
+            "1496542503589908603",
+            "1496537304880255198",
+            "1496542241903349821",
+            "1496542172848197783",
+            "1496542109619064942",
+            "1496541997488672879");
 
     private static final String ANTINUKE_LOG_CHANNEL_ID = "1496630613996994630"; // updated anti-nuke log channel
     private static final String SPAM_LOG_CHANNEL_ID = "1496630888484835358"; // new spam log channel
@@ -199,50 +207,18 @@ public class Main extends ListenerAdapter {
             event.getChannel().deleteMessageById(messageId).queue(success -> {}, failure -> {});
         }
 
-        if (!action.shouldTimeout()) {
-            return true;
-        }
-
-        if (!event.getGuild().getSelfMember().hasPermission(Permission.MODERATE_MEMBERS)
-                || !event.getGuild().getSelfMember().canInteract(event.getMember())) {
-            event.getChannel().sendMessage("[Spam] I tried to timeout " + event.getAuthor().getAsMention() + " for spam, but I do not have permission (my role is too low or missing MODERATE_MEMBERS).").queue();
-            event.getAuthor().openPrivateChannel().queue(
-                channel -> channel.sendMessage("[Spam] I tried to timeout you for spam, but I do not have permission (my role is too low or missing MODERATE_MEMBERS). Please contact the server owner.").queue(),
-                failure -> {}
-            );
-            return true;
-        }
-
-        event.getMember().timeoutFor(1, TimeUnit.MINUTES)
-                .reason("Automatic spam timeout")
-                .queue(
-                        success -> {
-                            CaseRecord record = caseService.addCase(
-                                    CaseType.SPAM,
-                                    event.getGuild().getId(),
-                                    event.getChannel().getId(),
-                                    event.getMember().getId(),
-                                    event.getMember().getUser().getAsTag(),
-                                    event.getJDA().getSelfUser().getId(),
-                                    event.getJDA().getSelfUser().getAsTag(),
-                                    "Automatic spam timeout (1 minute)",
-                                    "Triggered by rapid message burst.");
-                            modLogService.logCase(event.getGuild(), record);
-                            event.getChannel().sendMessage(
-                                    event.getAuthor().getAsMention() + " timed out for 1 minute due to spam.")
-                                    .queue();
-                            event.getAuthor().openPrivateChannel().queue(
-                                channel -> channel.sendMessage("[Spam] You have been timed out for 1 minute for spamming. Please slow down.").queue(),
-                                failure -> {}
-                            );
-                        },
-                        failure -> {
-                            event.getChannel().sendMessage("[Spam] I tried to timeout " + event.getAuthor().getAsMention() + " for spam, but failed due to a Discord error.").queue();
-                            event.getAuthor().openPrivateChannel().queue(
-                                channel -> channel.sendMessage("[Spam] I tried to timeout you for spam, but failed due to a Discord error. Please contact the server owner.").queue(),
-                                f2 -> {}
-                            );
-                        });
+        CaseRecord record = caseService.addCase(
+                CaseType.SPAM,
+                event.getGuild().getId(),
+                event.getChannel().getId(),
+                event.getMember().getId(),
+                event.getMember().getUser().getAsTag(),
+                event.getJDA().getSelfUser().getId(),
+                event.getJDA().getSelfUser().getAsTag(),
+                "Automatic spam message cleanup",
+                "Triggered by rapid message burst.");
+        modLogService.logCase(event.getGuild(), record);
+        event.getChannel().sendMessage(event.getAuthor().getAsMention() + " no spam.").queue();
         return true;
     }
 
@@ -407,6 +383,10 @@ public class Main extends ListenerAdapter {
         if (actor.getId().equals(guild.getSelfMember().getId())) {
             return;
         }
+        if (antiNukeService.isWhitelisted(guild.getId(), actor.getId())) {
+            logAntiNuke(guild, "Anti-nuke: skipped " + actor.getUser().getAsTag() + " because they are whitelisted.");
+            return;
+        }
         long now = System.currentTimeMillis();
         String dedupeKey = guild.getId() + ":" + actor.getId() + ":" + category;
         Long previous = recentAntiNukePenalties.get(dedupeKey);
@@ -424,10 +404,8 @@ public class Main extends ListenerAdapter {
             );
             return;
         }
-        // Only remove these specific staff roles if the user has them
-        List<String> staffRoleIds = List.of("1475427475063574538", "1475529665190957187", "1496537304880255198");
         List<Role> rolesToRemove = actor.getRoles().stream()
-                .filter(role -> staffRoleIds.contains(role.getId()))
+                .filter(role -> ANTINUKE_STAFF_ROLE_IDS.contains(role.getId()))
                 .filter(selfMember::canInteract)
                 .toList();
         if (rolesToRemove.isEmpty()) {
@@ -540,6 +518,9 @@ public class Main extends ListenerAdapter {
 
     @Override
     public void onButtonInteraction(ButtonInteractionEvent event) {
+        if (PostVerifyPrototypeCommand.handleButton(event)) {
+            return;
+        }
         if (ModLogsCommand.handleButton(event)) {
             return;
         }
@@ -621,7 +602,7 @@ public class Main extends ListenerAdapter {
                 .addCommands(
                         Commands.slash("help", "Show moderation bot help"),
                         Commands.slash("an", "Manage anti-nuke mode (owner/server manager only)")
-                                .addOption(OptionType.STRING, "action", "on, off, status", false),
+                                .addOption(OptionType.STRING, "action", "on, off, status, list", false),
                         Commands.slash("mute", "Mute member by muted role")
                                 .addOption(OptionType.STRING, "target", "User mention or ID", true)
                                 .addOption(OptionType.STRING, "reason", "Reason", false),
@@ -656,6 +637,9 @@ public class Main extends ListenerAdapter {
                         Commands.slash("game", "Play the guess game")
                                 .addOption(OptionType.STRING, "action", "start, guess, status, stop", true)
                                 .addOption(OptionType.INTEGER, "number", "Required for guess action", false),
+                        Commands.slash("role", "Add/remove a role on a user (owner/server manager)")
+                                .addOption(OptionType.STRING, "role", "Role ID, mention, or name", true)
+                                .addOption(OptionType.STRING, "target", "User mention or ID", true),
                         Commands.slash("w", "Whois info for a member")
                                 .addOption(OptionType.STRING, "target", "User mention or ID", true),
                         Commands.slash("modlogs", "Show recent moderation logs for a user")

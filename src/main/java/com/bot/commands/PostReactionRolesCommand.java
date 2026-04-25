@@ -21,7 +21,9 @@ public class PostReactionRolesCommand implements BotCommand {
 
     @Override
     public boolean matches(String commandName) {
-        return "reactionroles".equalsIgnoreCase(commandName) || "rrpost".equalsIgnoreCase(commandName);
+        return "reactionroles".equalsIgnoreCase(commandName)
+                || "postreactionroles".equalsIgnoreCase(commandName)
+                || "rrpost".equalsIgnoreCase(commandName);
     }
 
     @Override

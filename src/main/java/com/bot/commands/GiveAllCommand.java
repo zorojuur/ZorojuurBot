@@ -17,10 +17,10 @@ public class GiveAllCommand implements BotCommand {
 
     @Override
     public void execute(MessageReceivedEvent event, String commandName, String[] args) {
-        if (!AccessControlService.getInstance().isBotOwner(event.getMember())) {
+        if (!AccessControlService.getInstance().isOwnerOrServerManager(event.getMember())) {
             event.getChannel().sendMessageEmbeds(CommandTemplateEmbeds.error(
                     "GiveAll",
-                    "Only the bot owner can use this command."))
+                    "Only the owner or server manager can use this command."))
                     .queue();
             return;
         }

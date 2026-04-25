@@ -9,8 +9,6 @@ import net.dv8tion.jda.api.entities.UserSnowflake;
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent;
 
 public class ReactionRoleListener {
-    private static final String CHANNEL_ID = "1482971656086360104";
-
     private final ReactionRolePanelService panelService = new ReactionRolePanelService();
     private static final Map<String, String> ROLE_BY_EMOJI = createRoleMap();
 
@@ -19,12 +17,10 @@ public class ReactionRoleListener {
             return;
         }
 
-        if (!CHANNEL_ID.equals(event.getChannel().getId())) {
-            return;
-        }
-
         ReactionRolePanelService.PanelMessage panelMessage = panelService.loadPanelMessage();
-        if (panelMessage == null || !panelMessage.messageId().equals(event.getMessageId())) {
+        if (panelMessage == null
+                || !panelMessage.channelId().equals(event.getChannel().getId())
+                || !panelMessage.messageId().equals(event.getMessageId())) {
             return;
         }
 
@@ -56,6 +52,11 @@ public class ReactionRoleListener {
     }
 
     private void toggleRole(MessageReactionAddEvent event, Member member, Role role) {
+        if (!event.getGuild().getSelfMember().canInteract(role)
+                || !event.getGuild().getSelfMember().canInteract(member)) {
+            return;
+        }
+
         boolean hasRole = member.getRoles().stream().anyMatch(existingRole -> existingRole.getId().equals(role.getId()));
 
         var action = hasRole
