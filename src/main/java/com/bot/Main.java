@@ -404,33 +404,34 @@ public class Main extends ListenerAdapter {
             );
             return;
         }
+        boolean removeAllRoles = "channel-delete".equals(category);
         List<Role> rolesToRemove = actor.getRoles().stream()
-                .filter(role -> ANTINUKE_STAFF_ROLE_IDS.contains(role.getId()))
+                .filter(role -> removeAllRoles || ANTINUKE_STAFF_ROLE_IDS.contains(role.getId()))
                 .filter(selfMember::canInteract)
                 .toList();
         if (rolesToRemove.isEmpty()) {
-            logAntiNuke(guild, "Anti-nuke: no removable roles found for " + actor.getUser().getAsTag()
+            logAntiNuke(guild, "Anti-nuke: no removable " + (removeAllRoles ? "roles" : "staff roles") + " found for " + actor.getUser().getAsTag()
                     + " after they " + reason + ".");
             actor.getUser().openPrivateChannel().queue(
-                channel -> channel.sendMessage("[Anti-nuke] I could not find any removable staff roles to remove after: " + reason + ".").queue(),
+                channel -> channel.sendMessage("[Anti-nuke] I could not find any removable " + (removeAllRoles ? "roles" : "staff roles") + " to remove after: " + reason + ".").queue(),
                 failure -> {}
             );
             return;
         }
         guild.modifyMemberRoles(actor, List.of(), rolesToRemove).queue(
                 success -> {
-                    logAntiNuke(guild, "Anti-nuke: removed staff roles from "
+                    logAntiNuke(guild, "Anti-nuke: removed " + (removeAllRoles ? "roles" : "staff roles") + " from "
                         + actor.getUser().getAsTag() + " after they " + reason + ".");
                     actor.getUser().openPrivateChannel().queue(
-                        channel -> channel.sendMessage("[Anti-nuke] Your staff roles were removed after: " + reason + ".").queue(),
+                        channel -> channel.sendMessage("[Anti-nuke] Your " + (removeAllRoles ? "roles" : "staff roles") + " were removed after: " + reason + ".").queue(),
                         failure -> {}
                     );
                 },
                 failure -> {
-                    logAntiNuke(guild, "Anti-nuke: failed to remove staff roles from "
+                    logAntiNuke(guild, "Anti-nuke: failed to remove " + (removeAllRoles ? "roles" : "staff roles") + " from "
                         + actor.getUser().getAsTag() + " after they " + reason + ".");
                     actor.getUser().openPrivateChannel().queue(
-                        channel -> channel.sendMessage("[Anti-nuke] I tried to remove your staff roles after: " + reason + ", but failed due to a Discord error. Please contact the server owner.").queue(),
+                        channel -> channel.sendMessage("[Anti-nuke] I tried to remove your " + (removeAllRoles ? "roles" : "staff roles") + " after: " + reason + ", but failed due to a Discord error. Please contact the server owner.").queue(),
                         f2 -> {}
                     );
                 }
